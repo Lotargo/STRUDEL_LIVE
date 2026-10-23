@@ -59,7 +59,7 @@ async function main() {
     const state = await command('session_start', {
       duration_seconds:seconds(option('duration','600'),600),
       style:option('style','darkwave'), bpm:seconds(option('bpm','124'),124),
-      title:option('title','Agent Live Performance'), open_browser:true
+      title:option('title','Agent Live Performance'), open_browser:true, open_terminal:false
     });
     console.log('Open and enable audio: '+state.browser_url);
     return monitor();

@@ -29,6 +29,20 @@ const parseBody = async (req, limit = 150000) => {
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 };
+const openTerminalMonitor = () => {
+  const bin = path.join(ROOT, 'bin', 'strudel-live.js');
+  if (process.platform === 'win32') {
+    // Launch a read-only monitor, never the 'stand' command that arms sessions.
+    const command = '"' + process.execPath + '" "' + bin + '" monitor';
+    const child = spawn('cmd.exe', ['/c', 'start', '"Strudel Live"', 'cmd.exe', '/k', command], { detached:true, stdio:'ignore', windowsHide:false });
+    child.on('error', (error) => process.stderr.write('Monitor launch: ' + error.message + '\n'));
+    child.unref();
+  } else if (process.platform === 'linux') {
+    const child = spawn('x-terminal-emulator', ['-e', process.execPath, bin, 'monitor'], { detached:true, stdio:'ignore' });
+    child.on('error', (error) => process.stderr.write('Monitor launch: ' + error.message + '\n'));
+    child.unref();
+  }
+};
 const openBrowser = (url) => {
   const plat = process.platform;
   const bin = plat === 'win32' ? 'cmd.exe' : plat === 'darwin' ? 'open' : 'xdg-open';
@@ -124,6 +138,7 @@ export class LiveServer {
       case 'session_start': {
         const result = await this.session.arm(command);
         if (command.open_browser !== false) openBrowser(this.browserURL());
+        if (command.open_terminal === true) openTerminalMonitor();
         return { ...result, browser_url: this.browserURL() };
       }
       case 'session_status': return this.session.statusSnapshot();

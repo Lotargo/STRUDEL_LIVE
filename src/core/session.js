@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-const ACTIVE = new Set(['armed', 'running', 'finishing']);
+const ACTIVE = new Set(['armed', 'running', 'interrupted', 'finishing']);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const safeName = (value) => String(value || 'live-set').normalize('NFKD').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64);
 
@@ -27,6 +27,7 @@ export class LiveSession {
   reset() {
     this.id = null;
     this.status = 'idle';
+    this.evalQueue = Promise.resolve();
     this.createdAt = null;
     this.startedAt = null;
     this.finishedAt = null;
@@ -54,6 +55,7 @@ export class LiveSession {
 
   guidance() {
     const remaining = this.targetSeconds - this.elapsed();
+    if (this.status === 'interrupted') return 'Recording interrupted. Finish/export this partial take; open a NEW session instead of pretending there is seamless recording.';
     if (this.status !== 'running') return 'Wait for the browser to unlock audio and report recording_started.';
     if (remaining <= 0) return 'Target passed. Resolve the music gracefully and call session_finish when tails decay; target is not a hard cutoff.';
     if (remaining < Math.max(12, this.targetSeconds * 0.08)) return 'Final resolution: remove rhythm, let reverberation decay and finish after silence.';
@@ -119,13 +121,18 @@ export class LiveSession {
   connected() {
     this.engineConnected = true;
     if (this.status === 'armed') this.send({ type: 'arm', session_id: this.id, bpm: this.bpm, title: this.title, style: this.style });
-    if (this.status === 'running') this.event('engine_reconnected', { warning: 'Browser reconnect does not guarantee uninterrupted audio.' });
+    if (this.status === 'interrupted') this.event('engine_reconnected', { warning: 'Partial capture remains interrupted; finish this take.' });
   }
 
   disconnected() {
     this.engineConnected = false;
     this.engineReady = false;
-    if (this.status === 'running') this.event('engine_disconnected', { warning: 'Capture may have a gap.' });
+    if (this.status === 'running') {
+      this.finishedAt = this.clock();
+      this.status = 'interrupted';
+      this.recorderState = 'interrupted';
+      this.event('engine_disconnected', { warning: 'Recording interrupted. Finish and restart a new take.' });
+    }
     for (const [id, p] of this.pending) {
       clearTimeout(p.timer); p.reject(new Error('Audio engine disconnected')); this.pending.delete(id);
     }
@@ -187,6 +194,10 @@ export class LiveSession {
   async evaluate(code, comment = '') {
     if (this.status !== 'running') throw new Error('Session not recording. Unlock audio in browser first.');
     if (typeof code !== 'string' || !code.trim() || code.length > 100000) throw new Error('Expected nonempty Strudel code <= 100 KB');
+    const previous = this.evalQueue;
+    let finishQueue;
+    this.evalQueue = new Promise((resolve) => { finishQueue = resolve; });
+    await previous;
     try {
       await this.request('evaluate', { code, comment: String(comment).slice(0, 300) });
       this.activeCode = code;
@@ -197,6 +208,8 @@ export class LiveSession {
     } catch (error) {
       this.event('code_rejected', { comment: String(comment), error: error.message });
       throw error;
+    } finally {
+      finishQueue();
     }
   }
 
