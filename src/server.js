@@ -1,396 +1,157 @@
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { LiveSession } from './core/session.js';
 import { generateSpeechWav } from './tts/tts-engine.js';
 
-const execAsync = promisify(exec);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, '..');
-const RECORDINGS_DIR = path.join(ROOT_DIR, 'recordings');
-const SAMPLES_DIR = path.join(ROOT_DIR, 'public', 'samples');
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const DATA = path.join(os.homedir(), '.strudel-live');
+const WEB = path.join(ROOT, 'src', 'web');
+const SAMPLE_DIR = path.join(DATA, 'samples');
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webm': 'audio/webm' };
+const validSample = (x) => /^[a-zA-Z0-9_-]{1,90}\.(wav|mp3|ogg|webm)$/.test(x);
 
-if (!fs.existsSync(RECORDINGS_DIR)) fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
-if (!fs.existsSync(SAMPLES_DIR)) fs.mkdirSync(SAMPLES_DIR, { recursive: true });
+const sendJSON = (res, code, data) => {
+  res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+  res.end(JSON.stringify(data));
+};
+const parseBody = async (req, limit = 150000) => {
+  let size = 0, chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Error('Request exceeds size limit');
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+};
+const openBrowser = (url) => {
+  const plat = process.platform;
+  const bin = plat === 'win32' ? 'cmd.exe' : plat === 'darwin' ? 'open' : 'xdg-open';
+  const args = plat === 'win32' ? ['/c', 'start', '""', url] : [url];
+  const child = spawn(bin, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', (error) => process.stderr.write('Browser launch: ' + error.message + '\n'));
+  child.unref();
+};
 
-export class StrudelLiveServer {
-  constructor(port = 3883) {
+export class LiveServer {
+  constructor(port = 3883, token = randomBytes(24).toString('hex')) {
     this.port = port;
-    this.httpServer = null;
+    this.token = token;
+    this.http = null;
     this.wss = null;
-    this.browserProcess = null;
-    this.terminalProcess = null;
-    this.activeWs = null;
-
-    this.session = {
-      status: 'idle',
-      duration: 600,
-      style: 'darkwave',
-      bpm: 124,
-      title: 'Untitled Live Set',
-      startTime: null,
-      elapsed: 0,
-      remaining: 600,
-      percent: 0,
-      phase: 'IDLE',
-      activeCode: '',
-      logs: [],
-      recordingWebm: null,
-      recordingWav: null,
-      recordingMp3: null,
-      webmWriteStream: null
-    };
-
-    this.listeners = new Set();
+    this.engine = null;
+    fs.mkdirSync(SAMPLE_DIR, { recursive: true });
+    this.session = new LiveSession({
+      recordingsDir: path.join(DATA, 'recordings'),
+      send: (data) => this.send(data)
+    });
   }
-
-  onUpdate(fn) {
-    this.listeners.add(fn);
+  send(message) {
+    if (!this.engine || this.engine.readyState !== WebSocket.OPEN) return false;
+    this.engine.send(JSON.stringify(message));
+    return true;
   }
-
-  notifyUpdate() {
-    for (const fn of this.listeners) {
-      try { fn(this.session); } catch (e) {}
-    }
+  browserURL() { return 'http://127.0.0.1:' + this.port + '/?token=' + this.token; }
+  authorized(req, url) {
+    const header = req.headers.authorization || '';
+    return header === 'Bearer ' + this.token || url.searchParams.get('token') === this.token;
   }
-
   async start() {
-    if (this.httpServer) return;
-
-    this.httpServer = http.createServer((req, res) => {
-      this.handleHttp(req, res);
-    });
-
-    this.wss = new WebSocketServer({ server: this.httpServer, path: '/live-socket' });
-
-    this.wss.on('connection', (ws) => {
-      this.activeWs = ws;
-      // Stand browser connected via WebSocket
-
-      // Send initial state if session is already running
-      if (this.session.status === 'running') {
-        ws.send(JSON.stringify({
-          type: 'start',
-          duration: this.session.duration,
-          style: this.session.style,
-          bpm: this.session.bpm,
-          title: this.session.title
-        }));
-        if (this.session.activeCode) {
-          ws.send(JSON.stringify({
-            type: 'eval',
-            code: this.session.activeCode,
-            comment: 'Restored active pattern'
-          }));
-        }
+    if (this.http) return;
+    this.http = http.createServer((req, res) => this.handle(req, res).catch((error) => sendJSON(res, 500, { error: error.message })));
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
+    this.http.on('upgrade', (req, socket, head) => {
+      const url = new URL(req.url, 'http://localhost');
+      const origin = req.headers.origin || '';
+      const expected = 'http://127.0.0.1:' + this.port;
+      if (url.pathname !== '/engine' || url.searchParams.get('token') !== this.token || origin !== expected || this.engine) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return;
       }
-
-      ws.on('message', (data, isBinary) => {
-        if (isBinary) {
-          // Binary audio chunk from MediaRecorder
-          if (this.session.webmWriteStream) {
-            this.session.webmWriteStream.write(Buffer.from(data));
+      this.wss.handleUpgrade(req, socket, head, (ws) => {
+        this.engine = ws;
+        this.session.connected();
+        this.wss.emit('connection', ws);
+        ws.on('message', (data, binary) => {
+          if (binary) this.session.writeAudio(Buffer.from(data));
+          else {
+            try { this.session.onMessage(JSON.parse(data.toString())); }
+            catch (error) { process.stderr.write('Engine message rejected: ' + error.message + '\n'); }
           }
-        } else {
-          try {
-            const msg = JSON.parse(data.toString());
-            this.handleWsMessage(msg);
-          } catch (e) {
-            console.error('Error parsing WS message:', e);
-          }
-        }
-      });
-
-      ws.on('close', () => {
-        if (this.activeWs === ws) this.activeWs = null;
+        });
+        ws.on('close', () => {
+          if (this.engine === ws) { this.engine = null; this.session.disconnected(); }
+        });
       });
     });
-
-    return new Promise((resolve) => {
-      this.httpServer.listen(this.port, '127.0.0.1', () => {
+    await new Promise((resolve, reject) => {
+      this.http.once('error', reject);
+      this.http.listen(this.port, '127.0.0.1', () => {
+        this.http.removeListener('error', reject);
         resolve();
       });
     });
   }
-
-  handleHttp(req, res) {
-    const url = new URL(req.url, `http://127.0.0.1:${this.port}`);
-    let pathname = url.pathname;
-
-    if (pathname === '/' || pathname === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(fs.readFileSync(path.join(__dirname, 'web', 'index.html')));
-      return;
+  async handle(req, res) {
+    const url = new URL(req.url, 'http://127.0.0.1:' + this.port);
+    if (!this.authorized(req, url)) return sendJSON(res, 403, { error: 'Unauthorized local request' });
+    if (req.method === 'GET' && url.pathname === '/api/status') return sendJSON(res, 200, this.session.statusSnapshot());
+    if (req.method === 'POST' && url.pathname === '/api/command') {
+      try { return sendJSON(res, 200, await this.command(await parseBody(req))); }
+      catch (error) { return sendJSON(res, 400, { error: error.message }); }
     }
-
-    if (pathname === '/style.css') {
-      res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(fs.readFileSync(path.join(__dirname, 'web', 'style.css')));
-      return;
+    let file;
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) file = path.join(WEB, 'index.html');
+    if (req.method === 'GET' && ['/engine.js', '/style.css'].includes(url.pathname)) file = path.join(WEB, url.pathname.slice(1));
+    if (req.method === 'GET' && url.pathname.startsWith('/samples/')) {
+      const name = decodeURIComponent(url.pathname.slice('/samples/'.length));
+      if (!validSample(name)) return sendJSON(res, 400, { error: 'Invalid sample name' });
+      file = path.join(SAMPLE_DIR, name);
     }
-
-    if (pathname === '/engine.js') {
-      res.writeHead(200, { 'Content-Type': 'application/javascript' });
-      res.end(fs.readFileSync(path.join(__dirname, 'web', 'engine.js')));
-      return;
+    if (file && fs.existsSync(file)) {
+      res.writeHead(200, { 'content-type': mime[path.extname(file)] || 'application/octet-stream', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+      fs.createReadStream(file).pipe(res); return;
     }
-
-    if (pathname === '/strudel-web.mjs') {
-      const file = path.join(ROOT_DIR, 'node_modules', '@strudel', 'web', 'dist', 'index.mjs');
-      res.writeHead(200, { 'Content-Type': 'application/javascript' });
-      res.end(fs.readFileSync(file));
-      return;
-    }
-
-    if (pathname.startsWith('/assets/')) {
-      const file = path.join(ROOT_DIR, 'node_modules', '@strudel', 'web', 'dist', pathname);
-      if (fs.existsSync(file)) {
-        res.writeHead(200, { 'Content-Type': 'application/javascript' });
-        res.end(fs.readFileSync(file));
-        return;
+    return sendJSON(res, 404, { error: 'Not found' });
+  }
+  async command(command) {
+    if (!command || typeof command !== 'object') throw new Error('Invalid command');
+    switch (command.action) {
+      case 'session_start': {
+        const result = await this.session.arm(command);
+        if (command.open_browser !== false) openBrowser(this.browserURL());
+        return { ...result, browser_url: this.browserURL() };
       }
-    }
-
-    if (pathname.startsWith('/samples/')) {
-      const filename = path.basename(pathname);
-      const file = path.join(SAMPLES_DIR, filename);
-      if (fs.existsSync(file)) {
-        res.writeHead(200, { 'Content-Type': 'audio/wav' });
-        res.end(fs.readFileSync(file));
-        return;
+      case 'session_status': return this.session.statusSnapshot();
+      case 'eval': return this.session.evaluate(command.code, command.comment);
+      case 'sample_import': {
+        const from = path.resolve(String(command.path || ''));
+        const name = String(command.name || path.basename(from)).replace(/[^a-zA-Z0-9_.-]/g, '_');
+        if (!validSample(name)) throw new Error('Allowed extensions: wav/mp3/ogg/webm and simple basename');
+        if (!fs.statSync(from).isFile() || fs.statSync(from).size > 25 * 1024 * 1024) throw new Error('File missing or exceeds 25MB');
+        fs.copyFileSync(from, path.join(SAMPLE_DIR, name));
+        return { name, location: path.join(SAMPLE_DIR, name), sample_url: '/samples/' + name };
       }
-    }
-
-    res.writeHead(404);
-    res.end('Not found');
-  }
-
-  handleWsMessage(msg) {
-    if (msg.type === 'telemetry') {
-      this.session.elapsed = msg.elapsed;
-      this.session.remaining = msg.remaining;
-      this.session.percent = msg.percent;
-      this.session.phase = msg.phase;
-      this.notifyUpdate();
-    }
-  }
-
-  async launchBrowser(openWindow = true) {
-    if (this.browserProcess) return;
-
-    const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-    const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-    const binary = fs.existsSync(edgePath) ? edgePath : chromePath;
-
-    const profileDir = path.join(os.tmpdir(), 'strudel_live_profile');
-    const url = `http://127.0.0.1:${this.port}/index.html`;
-    const args = [
-      `--user-data-dir=${profileDir}`,
-      `--app=${url}`,
-      '--autoplay-policy=no-user-gesture-required',
-      '--window-size=940,680',
-      '--no-first-run',
-      '--no-default-browser-check'
-    ];
-
-    if (!openWindow) {
-      args.push('--window-position=-2000,-2000');
-    }
-
-    console.error(`Spawning stand browser: ${binary} for ${url}`);
-    this.browserProcess = spawn(binary, args, { detached: true, stdio: 'ignore' });
-    this.browserProcess.unref();
-  }
-
-  async startSession(opts = {}) {
-    await this.start();
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const safeTitle = (opts.title || 'Live_Set').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const baseFilename = `${safeTitle}_${opts.style || 'darkwave'}_${timestamp}`;
-
-    this.session.duration = opts.duration_seconds || 600;
-    this.session.style = opts.style || 'darkwave';
-    this.session.bpm = opts.bpm || 124;
-    this.session.title = opts.title || 'Darkwave Live Session';
-    this.session.status = 'running';
-    this.session.startTime = Date.now();
-    this.session.elapsed = 0;
-    this.session.remaining = this.session.duration;
-    this.session.percent = 0;
-    this.session.phase = 'PHASE 1: ATMOSPHERE';
-    this.session.logs = [];
-
-    const webmFile = path.join(RECORDINGS_DIR, `${baseFilename}.webm`);
-    this.session.recordingWebm = webmFile;
-    this.session.recordingWav = path.join(RECORDINGS_DIR, `${baseFilename}.wav`);
-    this.session.recordingMp3 = path.join(RECORDINGS_DIR, `${baseFilename}.mp3`);
-    this.session.webmWriteStream = fs.createWriteStream(webmFile);
-
-    // Launch browser stand if not already open
-    await this.launchBrowser(opts.open_window !== false);
-
-    // Wait up to 6 seconds for browser to connect via WebSocket
-    if (!this.activeWs) {
-      console.error('Waiting for browser stand to connect...');
-      await new Promise((resolve) => {
-        const timeout = setTimeout(resolve, 6000);
-        const check = setInterval(() => {
-          if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
-            clearTimeout(timeout);
-            clearInterval(check);
-            resolve();
-          }
-        }, 150);
-      });
-    }
-
-    // If WS is open, send start immediately
-    if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
-      this.activeWs.send(JSON.stringify({
-        type: 'start',
-        duration: this.session.duration,
-        style: this.session.style,
-        bpm: this.session.bpm,
-        title: this.session.title
-      }));
-    }
-
-    this.log(`Session initialized. Target: ${Math.floor(this.session.duration / 60)}m, Style: ${this.session.style}`);
-    return this.getStatus();
-  }
-
-  async evalCode(code, comment = '') {
-    this.session.activeCode = code;
-    this.log(comment || 'Updated algorithmic pattern');
-
-    if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
-      this.activeWs.send(JSON.stringify({
-        type: 'eval',
-        code,
-        comment
-      }));
-    }
-
-    return {
-      success: true,
-      elapsed: this.session.elapsed,
-      remaining: this.session.remaining,
-      phase: this.session.phase
-    };
-  }
-
-  async triggerVox(text, options = {}) {
-    const voxId = `vox_${Date.now()}`;
-    const wavFile = path.join(SAMPLES_DIR, `${voxId}.wav`);
-    
-    // Generate voice sample via Windows TTS
-    await generateSpeechWav(text, wavFile, {
-      rate: options.rate ?? -2,
-      voice: options.voice ?? ''
-    });
-
-    const wavUrl = `/samples/${voxId}.wav`;
-    this.log(`VOX: "${text}"`, true);
-
-    if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
-      this.activeWs.send(JSON.stringify({
-        type: 'vox',
-        text,
-        wavUrl,
-        gain: options.gain ?? 1.2
-      }));
-    }
-
-    return {
-      success: true,
-      text,
-      sampleUrl: wavUrl
-    };
-  }
-
-  async stopSession() {
-    this.session.status = 'stopped';
-    this.log('Session stop requested. Finalizing audio stream.');
-
-    if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
-      this.activeWs.send(JSON.stringify({ type: 'stop' }));
-    }
-
-    // Wait a brief moment for buffer flush
-    await new Promise((r) => setTimeout(r, 1200));
-
-    if (this.session.webmWriteStream) {
-      this.session.webmWriteStream.end();
-    }
-
-    // Transcode WebM recording to high quality WAV and MP3 via ffmpeg
-    const webmFile = this.session.recordingWebm;
-    const wavFile = this.session.recordingWav;
-    const mp3File = this.session.recordingMp3;
-
-    if (fs.existsSync(webmFile) && fs.statSync(webmFile).size > 0) {
-      try {
-        console.error('Transcoding audio recording to WAV and MP3 with ffmpeg...');
-        await execAsync(`ffmpeg -y -i "${webmFile}" -c:a pcm_s16le "${wavFile}"`);
-        await execAsync(`ffmpeg -y -i "${webmFile}" -b:a 320k "${mp3File}"`);
-        console.error(`Saved master recording to ${wavFile} and ${mp3File}`);
-      } catch (err) {
-        console.error('ffmpeg transcoding error:', err);
+      case 'sample_play': {
+        const name = String(command.sample || '');
+        if (!validSample(name) || !fs.existsSync(path.join(SAMPLE_DIR, name))) throw new Error('Import this sample first');
+        return this.session.playSample(name, command);
       }
+      case 'vocal_generate': {
+        if (this.session.status !== 'running') throw new Error('Session must be running');
+        const text = String(command.text || '');
+        if (!text.trim() || text.length > 250) throw new Error('Vocal text length 1..250');
+        const name = 'voice-' + randomBytes(8).toString('hex') + '.wav';
+        await generateSpeechWav(text, path.join(SAMPLE_DIR, name), command);
+        const res = await this.session.playSample(name, command);
+        return { ...res, sample_name: name };
+      }
+      case 'session_finish': return this.session.finish(command);
+      default: throw new Error('Unknown action: ' + String(command.action));
     }
-
-    if (this.browserProcess) {
-      try { this.browserProcess.kill(); } catch (e) {}
-      this.browserProcess = null;
-    }
-
-    return {
-      success: true,
-      duration_seconds: Math.floor(this.session.elapsed),
-      wav_path: fs.existsSync(wavFile) ? wavFile : null,
-      mp3_path: fs.existsSync(mp3File) ? mp3File : null,
-      title: this.session.title,
-      style: this.session.style,
-      total_logs: this.session.logs.length
-    };
   }
-
-  log(msg, isVox = false) {
-    const m = Math.floor(this.session.elapsed / 60);
-    const s = Math.floor(this.session.elapsed % 60);
-    const timeStr = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    this.session.logs.push({ time: timeStr, message: msg, isVox });
-    this.notifyUpdate();
-  }
-
-  getStatus() {
-    return {
-      status: this.session.status,
-      elapsed_seconds: Math.round(this.session.elapsed),
-      remaining_seconds: Math.round(this.session.remaining),
-      progress_percent: parseFloat(this.session.percent.toFixed(1)),
-      phase: this.session.phase,
-      duration_total_seconds: this.session.duration,
-      bpm: this.session.bpm,
-      style: this.session.style,
-      title: this.session.title,
-      active_code: this.session.activeCode,
-      recording_wav: this.session.recordingWav,
-      recent_logs: this.session.logs.slice(-5)
-    };
-  }
-}
-
-// Singleton server instance for MCP and CLI
-let serverInstance = null;
-export function getServerInstance(port = 3883) {
-  if (!serverInstance) {
-    serverInstance = new StrudelLiveServer(port);
-  }
-  return serverInstance;
 }
