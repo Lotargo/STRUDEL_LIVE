@@ -61,6 +61,8 @@ The Codex autopilot repeatedly invokes **real Codex CLI model turns**. Each turn
 | --- | --- |
 | `strudel_session_start` | Arms session, launches browser, returns URL |
 | `strudel_session_status` | Actual clock, recording/engine state, last successful code and events |
+| `strudel_session_history` | Recent musical decisions for continuity over longer performances |
+| `strudel_vocal_library` | Imported local vocal/sample inventory |
 | `strudel_eval` | Apply complete Strudel code; wait for browser acceptance before returning success |
 | `strudel_sample_import` | Copy local WAV/MP3/OGG/WebM into guarded sample library (25MB limit) |
 | `strudel_vocal_play` | Overlay a recorded sample on beat/bar through stereo capture bus |

@@ -82,6 +82,9 @@ async function enableAudio() {
     await ctx.resume();
     if (ctx.state !== 'running') throw new Error('AudioContext still suspended; click again');
     initRecorder();
+    // Previous session may have faded the persistent master bus to zero.
+    tap.gain.cancelScheduledValues(audioCtx.currentTime);
+    tap.gain.setValueAtTime(1, audioCtx.currentTime);
     if (recorder.state !== 'inactive') throw new Error('Recorder is already active');
     recorder.start(500);
     startedAt = performance.now();
