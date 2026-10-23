@@ -1,11 +1,11 @@
 {
   "name": "strudel-live",
-  "displayName": "Strudel Live Stand",
-  "description": "Live algorithmic music generation in Strudel with real-time audio playback, visualizer stand, synthetic vocals, and master audio recording.",
-  "version": "1.0.0",
+  "displayName": "Strudel Live / Real Agent Performer",
+  "version": "2.0.0",
+  "description": "Persistent local Strudel audio workstation controlled over MCP by AGY or Codex. Autonomous incremental composition, confirmed audio recording, real vocal overlays, MIDI/sample workflows.",
   "suggestedPrompts": [
-    "Давай посочиняем в штруделе на 10 минут в стиле дарквейв",
-    "Запусти live сет в стиле witch house с синтетическим голосом",
-    "Сделай 5 минут темного техно с live переходами в штруделе"
+    "Начни десятиминутное живое выступление darkwave в Strudel, развивай композицию в процессе и сам заверши её.",
+    "Используй вокальные сэмплы для jungle/breakcore и фиксируй изменения в журнале исполнений.",
+    "Перейди от ambient-вступления к industrial нарастающим живым кодом."
   ]
 }

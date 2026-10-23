@@ -1,27 +1,29 @@
 {
-  "name": "strudel_live",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "strudel-live",
+  "version": "2.0.0",
+  "description": "Time-aware live Strudel performance bridge for AGY and Codex with captured vocal overdubs",
+  "type": "module",
+  "bin": {
+    "strudel-live": "./bin/strudel-live.js"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node bin/strudel-live.js serve",
+    "stand": "node bin/strudel-live.js stand",
+    "monitor": "node bin/strudel-live.js monitor",
+    "autopilot": "node bin/strudel-live.js autopilot",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/server.js && node --check src/core/session.js && node --check src/web/engine.js && node --check src/mcp/mcp-server.js && node --check bin/strudel-live.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Lotargo/STRUDEL_LIVE.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "bugs": {
-    "url": "https://github.com/Lotargo/STRUDEL_LIVE/issues"
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
   },
-  "homepage": "https://github.com/Lotargo/STRUDEL_LIVE#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@strudel/web": "^1.3.0",
-    "commander": "^15.0.0",
     "ws": "^8.22.0"
   }
 }

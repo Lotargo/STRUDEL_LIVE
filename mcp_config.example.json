@@ -3,7 +3,7 @@
     "strudel-live": {
       "command": "node",
       "args": [
-        "F:\\projects\\STRUDEL_LIVE\\src\\mcp\\mcp-server.js"
+        "/ABSOLUTE/PATH/STRUDEL_LIVE/src/mcp/mcp-server.js"
       ]
     }
   }

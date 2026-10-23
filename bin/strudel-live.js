@@ -1,101 +1,101 @@
 #!/usr/bin/env node
+import { LiveServer, DATA } from '../src/server.js';
+import { command, writeRuntime, ensureDaemon } from '../src/client.js';
+import { runCodexAutopilot } from '../src/agents/codex-runner.js';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
-import { Command } from 'commander';
-import { getServerInstance } from '../src/server.js';
-import { StandTerminalUI } from '../src/tui/terminal.js';
-import { GENRE_PRESETS } from '../src/performer/presets.js';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2);
+const action = args.shift() || 'help';
+const option = (name, fallback) => { const idx = args.indexOf('--' + name); return idx >= 0 && args[idx + 1] ? args[idx+1] : fallback; };
+const seconds = (x, fallback) => Number.isFinite(Number(x)) && Number(x)>0 ? Number(x) : fallback;
 
-const program = new Command();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const clock = (n) => String(Math.floor(n/60)).padStart(2,'0') + ':' + String(Math.floor(n%60)).padStart(2,'0');
 
-program
-  .name('strudel-live')
-  .description('Strudel Live Stand - Autonomous Agent Performer & Recording Suite')
-  .version('1.0.0');
-
-program
-  .command('stand')
-  .description('Launch the live performer stand (Server + Browser + Terminal UI)')
-  .option('-d, --duration <seconds>', 'Set target duration in seconds', '600')
-  .option('-s, --style <genre>', 'Musical genre (darkwave, witch_house, techno)', 'darkwave')
-  .option('-b, --bpm <number>', 'Tempo in BPM', '124')
-  .option('-t, --title <name>', 'Set track title', 'Autonomous Live Session')
-  .option('--autonomous', 'Enable autonomous progression director without waiting for agent')
-  .action(async (opts) => {
-    const duration = parseInt(opts.duration, 10);
-    const bpm = parseInt(opts.bpm, 10);
-    const server = getServerInstance(3883);
-
-    console.log(`Starting Strudel Live Stand for [${opts.style.toUpperCase()}] (${Math.round(duration / 60)} min)...`);
-    await server.startSession({
-      duration_seconds: duration,
-      style: opts.style,
-      bpm: bpm,
-      title: opts.title,
-      open_window: true
-    });
-
-    const tui = new StandTerminalUI(server);
-    tui.start();
-
-    // If autonomous mode is enabled, run the preset progression curve
-    if (opts.autonomous) {
-      runAutonomousSet(server, opts.style, duration);
+async function monitor() {
+  process.stdout.write('\x1b[?25l');
+  process.once('SIGINT', () => { process.stdout.write('\x1b[?25h\n'); process.exit(0); });
+  while (true) {
+    let state;
+    try { state = await command('session_status', {}, false); }
+    catch (error) { process.stdout.write('Daemon unavailable: '+error.message+'\n'); break; }
+    process.stdout.write('\x1b[2J\x1b[H');
+    process.stdout.write('  STRUDEL LIVE / MONITOR / AGY + CODEX\n');
+    process.stdout.write('  ====================================================\n');
+    process.stdout.write('  '+state.title+' / '+state.style+' / '+state.bpm+' BPM\n');
+    process.stdout.write('  '+clock(state.elapsed_seconds)+' / '+clock(state.target_duration_seconds)+' | '+state.status.toUpperCase()+'\n');
+    process.stdout.write('  '+state.revisions+' revisions | recorder: '+state.recording_state+' | engine: '+state.engine_connected+'\n\n');
+    process.stdout.write('  NEXT: '+state.suggested_action+'\n\n');
+    for (const event of state.recent_events || []) {
+      process.stdout.write('  ['+clock(event.at_seconds)+'] '+event.kind+' '+(event.comment || event.error || '')+'\n');
     }
-  });
-
-program
-  .command('server')
-  .description('Run only the background audio & WebSocket server')
-  .option('-p, --port <number>', 'Port to listen on', '3883')
-  .action(async (opts) => {
-    const server = getServerInstance(parseInt(opts.port, 10));
-    await server.start();
-    console.log('Server running in daemon mode. Ready for Antigravity MCP control.');
-  });
-
-async function runAutonomousSet(server, style, totalSeconds) {
-  const preset = GENRE_PRESETS[style] || GENRE_PRESETS.darkwave;
-  const t = preset.templates;
-
-  // Phase 1: Intro (0s)
-  await server.evalCode(t.intro, 'Introductory dark atmospheric drone');
-  await server.triggerVox('Система в сети. Тьма и пульс. Начинаем погружение.', { rate: -2 });
-
-  // Phase 2: Exposition (~15% of duration)
-  setTimeout(async () => {
-    await server.evalCode(t.exposition, '4-on-the-floor beat kick-in with arpeggio');
-    await server.triggerVox('Чувствуешь этот ритм? Он уже внутри тебя.', { rate: -2 });
-  }, Math.max(8000, totalSeconds * 0.15 * 1000));
-
-  // Phase 3: Escalation (~35% of duration)
-  setTimeout(async () => {
-    await server.evalCode(t.escalation, 'Driving drums & screaming resonant lead');
-    await server.triggerVox('Перегрузка частот. Больше драйва, глубже в экстаз.', { rate: -1 });
-  }, Math.max(16000, totalSeconds * 0.35 * 1000));
-
-  // Phase 4: Peak (~65% of duration)
-  setTimeout(async () => {
-    if (t.peak) {
-      await server.evalCode(t.peak, 'Maximum peak energy & bitcrush accents');
-      await server.triggerVox('Максимальный пик. Никакого контроля.', { rate: -1 });
-    }
-  }, Math.max(24000, totalSeconds * 0.65 * 1000));
-
-  // Phase 5: Epilogue (~85% of duration)
-  setTimeout(async () => {
-    if (t.epilogue) {
-      await server.evalCode(t.epilogue, 'Epilogue: Deconstructing rhythm into dark reverberant space');
-      await server.triggerVox('Растворяемся в пустоте. Тьма принимает тебя.', { rate: -3 });
-    }
-  }, Math.max(32000, totalSeconds * 0.85 * 1000));
-
-  // Phase 6: Outro & Stop (~95% of duration)
-  setTimeout(async () => {
-    if (t.outro) await server.evalCode(t.outro, 'Final fading resonance');
-    setTimeout(async () => {
-      await server.stopSession();
-    }, 8000);
-  }, Math.max(38000, totalSeconds * 0.95 * 1000));
+    process.stdout.write('\n  Ctrl+C closes this monitor, NOT the performance.\n');
+    await sleep(1000);
+  }
 }
 
-program.parse(process.argv);
+async function main() {
+  if (action === 'serve') {
+    const port = seconds(option('port', '3883'), 3883);
+    const daemon = new LiveServer(port);
+    await daemon.start();
+    writeRuntime({ port, pid:process.pid, token:daemon.token, created_at:new Date().toISOString() });
+    console.log('Strudel daemon active on 127.0.0.1:' + port);
+    const shutdown = async () => {
+      try {
+        if (['running','armed','finishing'].includes(daemon.session.status)) await daemon.session.finish({fade_seconds:3});
+      } catch(error) { console.error(error.message); }
+      process.exit(0);
+    };
+    process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+    return;
+  }
+  if (action === 'stand') {
+    await ensureDaemon();
+    const state = await command('session_start', {
+      duration_seconds:seconds(option('duration','600'),600),
+      style:option('style','darkwave'), bpm:seconds(option('bpm','124'),124),
+      title:option('title','Agent Live Performance'), open_browser:true
+    });
+    console.log('Open and enable audio: '+state.browser_url);
+    return monitor();
+  }
+  if (action === 'status') { console.log(JSON.stringify(await command('session_status',{},false),null,2)); return; }
+  if (action === 'monitor') { await ensureDaemon(); return monitor(); }
+  if (action === 'finish') { console.log(JSON.stringify(await command('session_finish',{fade_seconds:seconds(option('fade','4'),4)},false),null,2)); return; }
+  if (action === 'autopilot') {
+    return runCodexAutopilot({
+      duration:seconds(option('duration','600'),600),
+      bpm:seconds(option('bpm','124'),124),
+      style:option('style','darkwave'),
+      title:option('title','Autonomous Strudel Live'),
+      model:option('model',null)
+    });
+  }
+  if (action === 'setup') {
+    const mcpPath = path.join(ROOT, 'src', 'mcp', 'mcp-server.js');
+    const client = option('client','codex');
+    if (client === 'codex') {
+      console.log('Run in your system terminal:\n');
+      console.log('codex mcp add strudel-live -- "' + process.execPath + '" "' + mcpPath + '"');
+      console.log('\nSkills are in .agents/skills/. Open Codex from project root.');
+    } else if (client === 'agy') {
+      const file = path.join(ROOT, 'mcp_config.local.json');
+      fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'strudel-live': { command:process.execPath, args:[mcpPath] } } }, null, 2));
+      console.log('Generated '+file+'. Register this MCP entry in AGY plugin settings; keep plugin.json and skills/ in the plugin folder.');
+    } else throw new Error('client must be codex or agy');
+    return;
+  }
+  console.log('Strudel Live v2\n');
+  console.log('  node bin/strudel-live.js setup --client codex|agy');
+  console.log('  node bin/strudel-live.js serve [--port 3883]');
+  console.log('  node bin/strudel-live.js stand --duration 600 --style darkwave --bpm 124');
+  console.log('  node bin/strudel-live.js monitor | status | finish [--fade 4]');
+  console.log('  node bin/strudel-live.js autopilot --duration 600 --style darkwave [--model <codex-model>]');
+  console.log('\nRequires npm install, Codex CLI/auth for autopilot, Chrome/Edge, click to unlock audio.');
+}
+main().catch((error) => { console.error(error.stack || error.message); process.exitCode=1; });
