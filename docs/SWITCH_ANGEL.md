@@ -13,7 +13,7 @@ The performer provides equal-length two-cycle breaks and sampled Serum pads, and
 She describes recording material from Strudel, usually each loop separately, into **Logic** and assembling the final song there. The advantage is choosing among random takes, mixing stems and editing without performing the code again. This is not an explanation of live voice synthesis. The user's observed singing in other videos is compatible with recording/capturing human vocal material; the precise processing chain cannot be inferred from this short video.
 
 ## What her extensions do
-https://github.com/switchangel/strudel-scripts/blob/main/prebake.strudel has helper functions ar, cue, tranche/trancegate, glitch, sf and other musical code. In particular:
+https://github.com/switchangel/strudel-scripts/blob/main/prebake.strudel has helper functions ar, cue, trancegate, glitch, sf and other musical code. In particular:
 - voc(key): sends MIDI CC 34 to a named hardware output 'tout', matching an external harmonizer key mapping; it does not generate speech or singer vocal audio by itself.
 - stxt(text, pat): maps text bytes into synth settings. Text-seeded synthesis is NOT text-to-speech.
 

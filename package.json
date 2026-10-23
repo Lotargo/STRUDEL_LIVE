@@ -11,7 +11,7 @@
     "stand": "node bin/strudel-live.js stand",
     "monitor": "node bin/strudel-live.js monitor",
     "autopilot": "node bin/strudel-live.js autopilot",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test",
     "check": "node --check src/server.js && node --check src/core/session.js && node --check src/web/engine.js && node --check src/mcp/mcp-server.js && node --check bin/strudel-live.js"
   },
   "repository": {

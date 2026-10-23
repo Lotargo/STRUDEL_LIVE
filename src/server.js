@@ -138,7 +138,7 @@ export class LiveServer {
       case 'session_start': {
         const result = await this.session.arm(command);
         if (command.open_browser !== false) openBrowser(this.browserURL());
-        if (command.open_terminal === true) openTerminalMonitor();
+        if (command.open_terminal !== false) openTerminalMonitor();
         return { ...result, browser_url: this.browserURL() };
       }
       case 'session_status': return this.session.statusSnapshot();
