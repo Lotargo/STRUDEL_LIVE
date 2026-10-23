@@ -1,374 +1,239 @@
-import { initStrudel, initAudio, evaluate, hush, getAudioContext, samples } from '/strudel-web.mjs';
+const key = new URL(location.href).searchParams.get('token');
+const $ = (id) => document.getElementById(id);
+let ws, armed = null, started = false, startedAt = 0, bpm = 124, code = '';
+let recorder = null, audioCtx = null, tap = null, analyser = null, queue = Promise.resolve(), previousTimer = 0;
+const initialConnect = AudioNode.prototype.connect;
 
-let audioCtx = null;
-let mediaRecorder = null;
-let recorderGain = null;
-let analyser = null;
-let ws = null;
+const clock = () => started ? (performance.now() - startedAt) / 1000 : 0;
+const formatTime = (n) => { n = Math.max(0, n); return String(Math.floor(n / 60)).padStart(2,'0') + ':' + String(Math.floor(n % 60)).padStart(2,'0'); };
+function log(message, kind = '') {
+  const e = document.createElement('div');
+  e.className = 'event ' + kind;
+  const t = document.createElement('time');
+  t.textContent = formatTime(clock());
+  e.append(t, document.createTextNode(message));
+  $('events').prepend(e);
+  while ($('events').children.length > 70) $('events').lastChild.remove();
+}
+function state(text, mode = '') {
+  $('state').textContent = text;
+  $('state').parentNode.className = 'state ' + mode;
+}
+function send(data) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data)); }
+function ack(message, success = true, extra = {}) {
+  send({ type:'operation_ack', request_id: message.request_id, success, ...extra });
+}
 
-let sessionConfig = {
-  duration: 600,
-  style: 'darkwave',
-  bpm: 124,
-  startTime: null,
-  activeCode: '',
-  isPlaying: false
+// One capture bus for both Strudel and imported voices.
+// Hook destination wiring BEFORE initStrudel. No duplicate direct-to-speakers connection.
+function captureBus(context) {
+  if (tap && tap.context === context) return tap;
+  const input = context.createGain();
+  const visual = context.createAnalyser();
+  visual.fftSize = 2048;
+  const output = context.createMediaStreamDestination();
+  initialConnect.call(input, visual);
+  initialConnect.call(input, output);
+  initialConnect.call(input, context.destination);
+  tap = input;
+  analyser = visual;
+  audioCtx = context;
+  captureBus.stream = output.stream;
+  return input;
+}
+AudioNode.prototype.connect = function(destination, ...args) {
+  if (destination instanceof AudioDestinationNode) {
+    const input = captureBus(this.context);
+    if (this === input) return initialConnect.call(this, destination, ...args);
+    return initialConnect.call(this, input, ...args.slice(0,1));
+  }
+  return initialConnect.call(this, destination, ...args);
 };
 
-const $ = (id) => document.getElementById(id);
-
-function formatTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function getPhase(percent) {
-  if (percent < 0.15) return 'PHASE 1: ATMOSPHERE';
-  if (percent < 0.35) return 'PHASE 2: GROOVE EXPOSITION';
-  if (percent < 0.65) return 'PHASE 3: ESCALATION & DRIVE';
-  if (percent < 0.82) return 'PHASE 4: MAXIMUM CLIMAX';
-  if (percent < 0.94) return 'PHASE 5: EPILOGUE & RESOLUTION';
-  return 'PHASE 6: FINAL OUTRO';
-}
-
-function appendLog(timeStr, message, isVox = false) {
-  const container = $('log-container');
-  if (!container) return;
-  const entry = document.createElement('div');
-  entry.className = 'log-entry';
-  entry.innerHTML = `
-    <span class="log-time">[${timeStr}]</span>
-    <span class="log-msg ${isVox ? 'log-vox' : ''}">${escapeHtml(message)}</span>
-  `;
-  container.appendChild(entry);
-  container.scrollTop = container.scrollHeight;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// Intercept Web Audio connects so we can record everything Strudel outputs
-function setupAudioTap(ctx) {
-  recorderGain = ctx.createGain();
-  analyser = ctx.createAnalyser();
-  analyser.fftSize = 512;
-  
-  recorderGain.connect(analyser);
-
-  const origConnect = AudioNode.prototype.connect;
-  AudioNode.prototype.connect = function (target, ...rest) {
-    if (target === ctx.destination && this !== recorderGain && this !== analyser) {
-      try {
-        origConnect.call(this, recorderGain);
-      } catch (e) {
-        // Ignore duplicate connect attempts
-      }
-    }
-    return origConnect.call(this, target, ...rest);
+function initRecorder() {
+  if (recorder) return;
+  if (!captureBus.stream) throw new Error('Missing WebAudio capture stream');
+  const wanted = ['audio/webm;codecs=opus','audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
+  if (!wanted) throw new Error('Browser cannot record WebM Opus. Use Chrome/Edge.');
+  recorder = new MediaRecorder(captureBus.stream, { mimeType: wanted, audioBitsPerSecond: 192000 });
+  recorder.ondataavailable = (event) => {
+    if (!event.data?.size) return;
+    queue = queue.then(async () => {
+      const data = await event.data.arrayBuffer();
+      if (ws?.readyState === WebSocket.OPEN) ws.send(data);
+      else throw new Error('Recording connection interrupted');
+    }).catch((error) => log('Recording chunk lost: ' + error.message, 'warn'));
   };
-
-  // Setup MediaStreamDestination for uncompressed/lossless WebM capture
-  const streamDest = ctx.createMediaStreamDestination();
-  recorderGain.connect(streamDest);
-
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus'
-    : 'audio/webm';
-
-  mediaRecorder = new MediaRecorder(streamDest.stream, { mimeType });
-  
-  mediaRecorder.ondataavailable = async (e) => {
-    if (e.data && e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      const buffer = await e.data.arrayBuffer();
-      ws.send(buffer);
-    }
+  recorder.onstop = async () => {
+    await queue; // All final chunks must be sent BEFORE recording_done.
+    send({ type:'recording_done', session_id: armed?.session_id });
+    $('capture-status').textContent = 'FINALIZED';
+    $('recording').textContent = 'REC ENDED';
   };
-
-  mediaRecorder.onstop = () => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'recorder_stopped' }));
-    }
-  };
-
-  startVisualizer();
 }
 
-// 60 FPS Neon Oscilloscope & Spectrum Visualizer
-function startVisualizer() {
-  const canvas = $('visualizer-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  
-  function resize() {
-    canvas.width = canvas.parentElement.clientWidth;
-    canvas.height = canvas.parentElement.clientHeight;
+async function enableAudio() {
+  if (!armed) return;
+  try {
+    if (typeof window.initAudio === 'function') await window.initAudio();
+    const ctx = typeof window.getAudioContext === 'function' ? window.getAudioContext() : audioCtx;
+    if (!ctx) throw new Error('Strudel AudioContext unavailable');
+    captureBus(ctx);
+    await ctx.resume();
+    if (ctx.state !== 'running') throw new Error('AudioContext still suspended; click again');
+    initRecorder();
+    if (recorder.state !== 'inactive') throw new Error('Recorder is already active');
+    recorder.start(500);
+    startedAt = performance.now();
+    started = true;
+    bpm = armed.bpm;
+    $('unlock').disabled = true;
+    $('unlock').hidden = true;
+    $('capture-status').textContent = 'RECORDING';
+    $('recording').textContent = 'REC • LIVE';
+    state('LIVE / RECORDING', 'recording');
+    log('Audio unlocked; started real capture.');
+    send({ type:'recording_started', session_id: armed.session_id });
+  } catch (error) {
+    state('AUDIO ERROR');
+    $('hint').textContent = error.message;
+    log('Audio start failed: ' + error.message, 'warn');
+    send({ type:'engine_error', error: error.message });
   }
-  resize();
-  window.addEventListener('resize', resize);
-
-  const bufferLength = analyser.frequencyBinCount;
-  const timeData = new Uint8Array(bufferLength);
-  const freqData = new Uint8Array(bufferLength);
-
-  function draw() {
-    requestAnimationFrame(draw);
-    if (!analyser) return;
-
-    analyser.getByteTimeDomainData(timeData);
-    analyser.getByteFrequencyData(freqData);
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    // Dark cyber trail
-    ctx.fillStyle = 'rgba(5, 6, 8, 0.25)';
-    ctx.fillRect(0, 0, w, h);
-
-    // Spectrum bars (subtle background)
-    const barWidth = (w / bufferLength) * 2.5;
-    let x = 0;
-    for (let i = 0; i < bufferLength; i += 2) {
-      const barHeight = (freqData[i] / 255) * h * 0.75;
-      ctx.fillStyle = `rgba(255, 0, 85, ${0.1 + (freqData[i] / 255) * 0.4})`;
-      ctx.fillRect(x, h - barHeight, barWidth, barHeight);
-      x += barWidth + 1;
-    }
-
-    // Oscilloscope wave (neon cyan glow)
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#00f0ff';
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = '#00f0ff';
-    ctx.beginPath();
-
-    const sliceWidth = w / bufferLength;
-    let waveX = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      const v = timeData[i] / 128.0;
-      const waveY = (v * h) / 2;
-      if (i === 0) {
-        ctx.moveTo(waveX, waveY);
-      } else {
-        ctx.lineTo(waveX, waveY);
-      }
-      waveX += sliceWidth;
-    }
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-  }
-
-  draw();
 }
 
-// Initialize Strudel and Engine
+function alignedTime(sync) {
+  const now = audioCtx.currentTime + 0.07;
+  if (sync === 'now') return now;
+  const secondsPerBeat = 60 / bpm;
+  const elapsed = clock();
+  const units = Math.ceil((elapsed + .07) / secondsPerBeat / (sync === 'bar' ? 4 : 1));
+  return now + Math.max(0, units * secondsPerBeat * (sync === 'bar' ? 4 : 1) - elapsed);
+}
+async function playSample(msg) {
+  if (!started || !tap) throw new Error('No active recording bus');
+  const url = '/samples/' + encodeURIComponent(msg.sample) + '?token=' + encodeURIComponent(key);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Sample HTTP ' + res.status);
+  const buffer = await audioCtx.decodeAudioData(await res.arrayBuffer());
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.playbackRate.value = msg.speed ?? 1;
+  const gain = audioCtx.createGain();
+  gain.gain.value = msg.gain ?? .7;
+  source.connect(gain);
+  gain.connect(tap); // Same bus -> audible, visualized AND recorded.
+  const at = alignedTime(msg.sync);
+  source.start(at);
+  log('VOCAL / ' + msg.sample + ' / ' + (msg.sync || 'beat'));
+  return at;
+}
+
+async function handle(msg) {
+  if (msg.type === 'arm') {
+    armed = msg; bpm = msg.bpm || bpm;
+    $('title').textContent = msg.title || 'Live set';
+    $('duration').textContent = formatTime(msg.target_seconds || 600);
+    $('bpm').textContent = bpm + ' BPM';
+    $('unlock').hidden = false;
+    $('unlock').disabled = false;
+    $('hint').textContent = 'Click once to start browser audio and real recording. No silent autoplay claims.';
+    state('AUDIO ARMED', 'connected');
+    log('Session armed. Ready for performer.');
+  }
+  if (msg.type === 'evaluate') {
+    try {
+      if (!started) throw new Error('Enable audio and recording first');
+      await window.evaluate(msg.code);
+      code = msg.code;
+      $('code').textContent = code;
+      $('revisions').textContent = String(Number($('revisions').textContent) + 1).padStart(2,'0');
+      $('code-tag').textContent = 'APPLIED / ' + formatTime(clock());
+      log(msg.comment ? 'REVISION / ' + msg.comment : 'New live code applied');
+      ack(msg);
+    } catch (error) { log('EVAL FAILED / ' + error.message, 'warn'); ack(msg, false, { error: error.message }); }
+  }
+  if (msg.type === 'sample_play') {
+    try { const time = await playSample(msg); ack(msg, true, { audio_time: time }); }
+    catch (error) { log('VOCAL ERROR / ' + error.message, 'warn'); ack(msg, false, { error: error.message }); }
+  }
+  if (msg.type === 'finish') {
+    if (!recorder || recorder.state !== 'recording') return ack(msg, false, { error: 'Recorder not active' });
+    const fade = Math.max(.2, Math.min(20, Number(msg.fade_seconds) || 4));
+    log('Requested musical epilogue. Fading master for ' + fade + 's');
+    state('FINALIZING', 'connected');
+    const now = audioCtx.currentTime;
+    tap.gain.cancelScheduledValues(now);
+    tap.gain.setValueAtTime(tap.gain.value, now);
+    tap.gain.linearRampToValueAtTime(0, now + fade);
+    ack(msg);
+    setTimeout(() => {
+      try { window.hush(); } catch {}
+      if (recorder.state === 'recording') recorder.stop();
+      started = false;
+    }, fade * 1000 + 100);
+  }
+}
+
+function render() {
+  const elapsed = clock();
+  if (started) {
+    $('elapsed').textContent = formatTime(elapsed);
+    $('remaining').textContent = formatTime(Math.max(0, (armed?.target_seconds || 600) - elapsed));
+    $('progress').style.width = Math.min(100, elapsed / (armed?.target_seconds || 600) * 100) + '%';
+    $('cycle').textContent = (elapsed * bpm / 240).toFixed(1);
+    $('phase').textContent = elapsed > (armed?.target_seconds || 600) ? 'OVERRUN · AGENT RESOLUTION' :
+      elapsed > (armed?.target_seconds || 600) * .8 ? 'EPILOGUE RECOMMENDED' : 'FREE LIVE COMPOSITION';
+  }
+  if (!analyser) return;
+  const canvas = $('scope'), ctx = canvas.getContext('2d');
+  const rect = canvas.getBoundingClientRect();
+  if (canvas.width !== rect.width * devicePixelRatio || canvas.height !== rect.height * devicePixelRatio) {
+    canvas.width = Math.floor(rect.width * devicePixelRatio);
+    canvas.height = Math.floor(rect.height * devicePixelRatio);
+  }
+  const arr = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(arr);
+  let rms = 0, peak = 0;
+  for (const v of arr) { const a = (v - 128) / 128; rms += a*a; peak = Math.max(peak, Math.abs(a)); }
+  rms = Math.sqrt(rms / arr.length);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.beginPath(); ctx.lineWidth = Math.max(1,devicePixelRatio * 1.5); ctx.strokeStyle = '#6af2ed';
+  const step = canvas.width / (arr.length - 1);
+  for (let i = 0; i < arr.length; i++) {
+    const y = canvas.height * .5 + ((arr[i] - 128) / 128) * canvas.height * .4;
+    i ? ctx.lineTo(i*step,y) : ctx.moveTo(0,y);
+  }
+  ctx.stroke();
+  $('meter').style.width = Math.round(Math.min(1,peak)*100) + '%';
+  if (started && performance.now() - previousTimer > 550) {
+    previousTimer = performance.now();
+    send({ type:'telemetry', session_id: armed.session_id, rms, peak,
+      recorder_state: recorder?.state || 'inactive' });
+  }
+}
 async function boot() {
-  $('status-text').innerText = 'LOADING AUDIO ENGINE';
+  state('ENGINE BOOT');
   try {
-    await initStrudel();
-    try {
-      await initAudio();
-    } catch (e) {
-      console.warn('initAudio non-critical:', e);
-    }
-    audioCtx = getAudioContext();
-    if (audioCtx && audioCtx.state === 'suspended') {
-      try {
-        await audioCtx.resume();
-      } catch (e) {}
-    }
-    setupAudioTap(audioCtx);
-
-    // Pre-load standard drum samples
-    try {
-      samples('github:tidalcycles/dirt-samples');
-    } catch (e) {}
-
-    // Check if audio context is running or needs click
-    updateAudioBanner();
-
-    $('status-text').innerText = 'READY FOR AGENT';
-    connectWebSocket();
-  } catch (err) {
-    $('status-text').innerText = 'BOOT ERROR: ' + err.message;
-    console.error('Strudel boot error:', err);
-  }
+    for (let i = 0; i < 150 && !window.initStrudel; i++) await new Promise(r=>setTimeout(r,100));
+    if (!window.initStrudel) throw new Error('Strudel library did not load (check CDN/network)');
+    await window.initStrudel({ prebake: () => window.samples('github:tidalcycles/dirt-samples') });
+    state('ENGINE READY', 'connected');
+    $('sample-rate').textContent = 'WEB AUDIO · CHROME/EDGE';
+    log('Strudel 1.3.0 ready; waiting for session arm.');
+    connect();
+  } catch (error) { state('ENGINE FAILED'); log(error.message, 'warn'); }
 }
-
-function updateAudioBanner() {
-  const banner = $('audio-unlock-banner');
-  if (!banner) return;
-  if (audioCtx && audioCtx.state === 'suspended') {
-    banner.style.display = 'block';
-  } else {
-    banner.style.display = 'none';
-  }
-}
-
-window.addEventListener('pointerdown', async () => {
-  try {
-    await initAudio();
-    if (audioCtx && audioCtx.state === 'suspended') {
-      await audioCtx.resume();
-    }
-    updateAudioBanner();
-  } catch (e) {}
-});
-
-function connectWebSocket() {
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${protocol}//${location.host}/live-socket`;
-  ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => {
-    $('status-text').innerText = 'STAND ONLINE';
-    appendLog('00:00', 'Stand connected to Antigravity control server.');
-  };
-
-  ws.onmessage = async (event) => {
-    if (typeof event.data === 'string') {
-      try {
-        const msg = JSON.parse(event.data);
-        handleServerCommand(msg);
-      } catch (e) {
-        console.error('Invalid WS message:', e);
-      }
-    }
-  };
-
-  ws.onclose = () => {
-    $('status-text').innerText = 'DISCONNECTED';
-    setTimeout(connectWebSocket, 1500);
+function connect() {
+  ws = new WebSocket('ws://' + location.host + '/engine?token=' + encodeURIComponent(key));
+  ws.onopen = () => { log('Connected to control daemon.'); send({ type:'engine_ready', sample_rate: audioCtx?.sampleRate || null }); };
+  ws.onclose = () => { state('DAEMON OFFLINE'); log('Control socket disconnected', 'warn'); setTimeout(connect, 1500); };
+  ws.onmessage = (e) => {
+    try { handle(JSON.parse(e.data)); }
+    catch (err) { log(err.message, 'warn'); }
   };
 }
-
-async function handleServerCommand(msg) {
-  if (msg.type === 'start') {
-    try {
-      await initAudio();
-      if (audioCtx && audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-      updateAudioBanner();
-    } catch (e) {}
-
-    sessionConfig.duration = msg.duration || 600;
-    sessionConfig.style = msg.style || 'darkwave';
-    sessionConfig.bpm = msg.bpm || 124;
-    sessionConfig.startTime = performance.now();
-    sessionConfig.isPlaying = true;
-
-    $('badge-style').innerText = sessionConfig.style.toUpperCase();
-    $('time-total').innerText = `/ ${formatTime(sessionConfig.duration)}`;
-    $('status-text').innerText = 'RECORDING LIVE';
-
-    if (mediaRecorder && mediaRecorder.state !== 'recording') {
-      mediaRecorder.start(1000); // 1-second chunks
-    }
-
-    appendLog('00:00', `Session initiated. Target duration: ${formatTime(sessionConfig.duration)}, Style: ${sessionConfig.style}, BPM: ${sessionConfig.bpm}`);
-  }
-
-  if (msg.type === 'eval') {
-    try {
-      try {
-        await initAudio();
-        if (audioCtx && audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-        }
-        updateAudioBanner();
-      } catch (e) {}
-
-      sessionConfig.activeCode = msg.code;
-      $('code-display').innerText = msg.code;
-      await evaluate(msg.code, true);
-
-      const elapsedSec = sessionConfig.startTime ? (performance.now() - sessionConfig.startTime) / 1000 : 0;
-      appendLog(formatTime(elapsedSec), msg.comment ? `[TRANSITION] ${msg.comment}` : 'Evaluated new algorithmic pattern');
-      
-      ws.send(JSON.stringify({ type: 'eval_ack', success: true }));
-    } catch (err) {
-      appendLog('ERROR', `Eval error: ${err.message}`);
-      ws.send(JSON.stringify({ type: 'eval_ack', success: false, error: err.message }));
-    }
-  }
-
-  if (msg.type === 'vox') {
-    try {
-      const elapsedSec = sessionConfig.startTime ? (performance.now() - sessionConfig.startTime) / 1000 : 0;
-      appendLog(formatTime(elapsedSec), `VOX: "${msg.text}"`, true);
-
-      // If pre-rendered wavUrl is provided, load and play it through Web Audio
-      if (msg.wavUrl) {
-        const resp = await fetch(msg.wavUrl);
-        const arrayBuf = await resp.arrayBuffer();
-        const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
-        
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuf;
-
-        // Route through Strudel effects (reverb/delay if desired)
-        const voxGain = audioCtx.createGain();
-        voxGain.gain.value = msg.gain ?? 1.1;
-
-        source.connect(voxGain);
-        voxGain.connect(recorderGain);
-        voxGain.connect(audioCtx.destination);
-
-        source.start();
-      } else if (window.speechSynthesis) {
-        // Fallback to Web Speech API
-        const utter = new SpeechSynthesisUtterance(msg.text);
-        utter.rate = msg.rate ?? 0.85;
-        utter.pitch = msg.pitch ?? 0.7;
-        window.speechSynthesis.speak(utter);
-      }
-      ws.send(JSON.stringify({ type: 'vox_ack', success: true }));
-    } catch (err) {
-      console.error('Vox error:', err);
-      ws.send(JSON.stringify({ type: 'vox_ack', success: false, error: err.message }));
-    }
-  }
-
-  if (msg.type === 'stop') {
-    sessionConfig.isPlaying = false;
-    $('status-text').innerText = 'FINALIZING';
-    hush();
-
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
-
-    const elapsedSec = sessionConfig.startTime ? (performance.now() - sessionConfig.startTime) / 1000 : 0;
-    appendLog(formatTime(elapsedSec), 'Session concluded. Finalizing audio recording.');
-  }
-}
-
-// Periodic Telemetry Loop
-setInterval(() => {
-  if (!sessionConfig.isPlaying || !sessionConfig.startTime) return;
-
-  const elapsedSec = (performance.now() - sessionConfig.startTime) / 1000;
-  const remainingSec = Math.max(0, sessionConfig.duration - elapsedSec);
-  const percent = Math.min(1.0, elapsedSec / sessionConfig.duration);
-
-  $('time-elapsed').innerText = formatTime(elapsedSec);
-  $('progress-bar').style.width = `${(percent * 100).toFixed(1)}%`;
-  $('phase-badge').innerText = getPhase(percent);
-
-  // Send status back to Node / MCP
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'telemetry',
-      elapsed: elapsedSec,
-      remaining: remainingSec,
-      percent: percent * 100,
-      phase: getPhase(percent),
-      activeCode: sessionConfig.activeCode
-    }));
-  }
-}, 500);
-
-window.addEventListener('DOMContentLoaded', boot);
+$('unlock').addEventListener('click', enableAudio);
+function frame() { render(); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+boot();

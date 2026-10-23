@@ -1,74 +1,56 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ STRUDEL LIVE STAND - AGENT LIVE PERFORMER</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>STRUDEL LIVE / Agent Performance</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="stand-container">
-    <div id="audio-unlock-banner" style="display:none; position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#ff0055; color:#fff; font-weight:bold; padding:10px 22px; border-radius:30px; z-index:9999; cursor:pointer; box-shadow:0 0 20px rgba(255,0,85,0.9); font-family:monospace; font-size:14px; letter-spacing:1px; animation:pulse 1.5s infinite;">
-      🔊 КЛИКНИТЕ ЗДЕСЬ ДЛЯ ВКЛЮЧЕНИЯ ЗВУКА
-    </div>
-    <!-- Header -->
-    <header class="stand-header">
-      <div class="stand-logo">
-        <h1>⚡ Strudel Live Performer</h1>
-        <span class="stand-badge" id="badge-style">DARKWAVE</span>
-      </div>
-      <div class="status-pill" id="status-pill">
-        <span class="status-dot"></span>
-        <span id="status-text">INITIALIZING</span>
-      </div>
+  <main class="shell">
+    <header class="top">
+      <div class="brand"><span class="mark">S/</span><div><small>AGENT LIVE PERFORMANCE</small><h1>STRUDEL LIVE</h1></div></div>
+      <div class="state"><i id="light"></i><span id="state">CONNECTING</span></div>
     </header>
-
-    <!-- Timeline & Progress Card -->
-    <div class="timeline-card">
-      <div class="timeline-info">
-        <div>
-          <span class="time-display" id="time-elapsed">00:00</span>
-          <span class="time-total" id="time-total">/ 10:00</span>
-        </div>
-        <div class="phase-indicator" id="phase-badge">PHASE 1: ATMOSPHERE</div>
+    <section class="hero">
+      <div class="micro">LIVE / COMPOSITION / PERFORMANCE / CAPTURE</div>
+      <div class="time-grid">
+        <div><span class="muted">ELAPSED</span><strong id="elapsed">00:00</strong></div>
+        <div><span class="muted">TARGET / NO HARD CUT</span><strong id="duration">10:00</strong></div>
+        <div><span class="muted">REMAINING</span><strong id="remaining">10:00</strong></div>
       </div>
-      <div class="progress-track">
-        <div class="progress-fill" id="progress-bar"></div>
+      <div class="track"><div id="progress"></div></div>
+      <div class="meta"><span id="title">Waiting for performer</span><span id="bpm">— BPM</span><span id="phase">STANDBY</span></div>
+      <button id="unlock" disabled>ENABLE AUDIO + START RECORDING</button>
+      <div id="hint">A session can begin only after the browser audio engine is unlocked.</div>
+    </section>
+    <section class="columns">
+      <div class="panel scope">
+        <div class="panel-head"><span>MASTER / STEREO BUS</span><span id="sample-rate">AUDIO UNARMED</span></div>
+        <canvas id="scope"></canvas>
+        <div class="meter"><div class="meter-fill" id="meter"></div></div>
       </div>
-    </div>
-
-    <!-- Live Audio Visualizer Card -->
-    <div class="visualizer-card">
-      <div class="card-title">
-        <span>Master Output Spectrum &amp; Oscilloscope</span>
-        <span id="audio-stats">48 kHz | Stereo PCM Stream</span>
+      <div class="panel activity">
+        <div class="panel-head"><span>PERFORMANCE TELEMETRY</span><span id="recording">REC IDLE</span></div>
+        <div class="number"><small>APPLIED REVISIONS</small><strong id="revisions">00</strong></div>
+        <div class="number"><small>EXPECTED BAR</small><strong id="cycle">0.0</strong></div>
+        <div class="number"><small>CAPTURE</small><strong id="capture-status">NOT STARTED</strong></div>
       </div>
-      <div class="canvas-wrapper">
-        <canvas id="visualizer-canvas"></canvas>
+    </section>
+    <section class="columns bottom">
+      <div class="panel">
+        <div class="panel-head"><span>LIVE PATTERN / LAST ACKNOWLEDGED CODE</span><span id="code-tag">NO CODE</span></div>
+        <pre id="code">Awaiting first real composition…</pre>
       </div>
-    </div>
-
-    <!-- Active Code Display Card -->
-    <div class="code-card">
-      <div class="card-title">
-        <span>Executing Strudel Pattern Buffer</span>
-        <span id="cycle-counter">Cycle: 0.0</span>
+      <div class="panel">
+        <div class="panel-head"><span>EVENT STREAM</span><span>AGENT / ENGINE / VOCAL</span></div>
+        <div id="events"></div>
       </div>
-      <pre class="code-view" id="code-display">// Waiting for agent evaluation...</pre>
-    </div>
-
-    <!-- Live Event Log -->
-    <div class="log-card">
-      <div class="card-title">Performer Live Stream &amp; Vox Log</div>
-      <div class="log-view" id="log-container">
-        <div class="log-entry">
-          <span class="log-time">[00:00]</span>
-          <span class="log-msg">Stand standby. Waiting for live coding session start.</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
+    </section>
+    <footer>LOCAL AUDIO ENGINE · AGY + CODEX · CAPTURED THROUGH SHARED WEB AUDIO BUS</footer>
+  </main>
+  <script src="https://unpkg.com/@strudel/web@1.3.0"></script>
   <script type="module" src="/engine.js"></script>
 </body>
 </html>
