@@ -29,6 +29,7 @@ export class LiveSession {
     this.status = 'idle';
     this.createdAt = null;
     this.startedAt = null;
+    this.finishedAt = null;
     this.targetSeconds = 600;
     this.style = 'darkwave';
     this.title = 'Untitled';
@@ -48,7 +49,7 @@ export class LiveSession {
   }
 
   elapsed() {
-    return this.startedAt === null ? 0 : Math.max(0, (this.clock() - this.startedAt) / 1000);
+    return this.startedAt === null ? 0 : Math.max(0, ((this.finishedAt ?? this.clock()) - this.startedAt) / 1000);
   }
 
   guidance() {
@@ -91,7 +92,11 @@ export class LiveSession {
   async arm(options = {}) {
     if (ACTIVE.has(this.status)) throw new Error('A session is already active. Finish it before starting another.');
     if (this.recorder) throw new Error('Recording stream not finalized');
+    const wasConnected = this.engineConnected;
+    const wasReady = this.engineReady;
     this.reset();
+    this.engineConnected = wasConnected;
+    this.engineReady = wasReady;
     this.id = randomUUID();
     this.createdAt = new Date().toISOString();
     this.targetSeconds = clamp(Number(options.duration_seconds) || 600, 30, 14400);
@@ -107,7 +112,7 @@ export class LiveSession {
     });
     this.status = 'armed';
     this.event('session_armed', { title: this.title, style: this.style, bpm: this.bpm, target_seconds: this.targetSeconds });
-    this.send({ type: 'arm', session_id: this.id, bpm: this.bpm, title: this.title, style: this.style });
+    this.send({ type: 'arm', session_id: this.id, bpm: this.bpm, title: this.title, style: this.style, target_seconds: this.targetSeconds });
     return this.statusSnapshot();
   }
 
@@ -245,6 +250,7 @@ export class LiveSession {
       if (mp3Result.ok) exports.push(mp3);
       if (!wavResult.ok || !mp3Result.ok) this.event('transcode_warning', { wav: wavResult.error, mp3: mp3Result.error });
     }
+    this.finishedAt = this.clock();
     this.status = 'finished';
     this.event('session_finished', { recording_confirmed: confirmed, exports });
     return { finished: true, recording_finalized: confirmed, source_webm: webm, exports,
