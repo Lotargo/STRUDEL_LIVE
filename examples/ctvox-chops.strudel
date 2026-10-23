@@ -1,0 +1,5 @@
+samples('github:switchangel/beginningtrance')
+stack(
+ s('bd*4,hh*8').gain(.35),
+ s('ctvox').n('<0 3 8 12>').slow(2).gain(.3).room(.3)
+).cpm(135/4)

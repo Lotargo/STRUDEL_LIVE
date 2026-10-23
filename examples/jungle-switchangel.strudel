@@ -1,0 +1,7 @@
+samples('github:switchangel/breaks')
+samples('github:switchangel/pad')
+stack(
+ s('breaks').n('<0@3 1>').scrub('<0 .125 .5 .75 .25 .375 .5 .875>').gain(.38),
+ s('swpad').n('0').slow(4).gain(.18),
+ s('hh*8').gain(.2)
+).cpm(168/4)

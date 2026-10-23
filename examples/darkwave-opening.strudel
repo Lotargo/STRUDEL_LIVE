@@ -1,0 +1,6 @@
+// Agent starting motif: evolve the full code through strudel_eval.
+stack(
+ s("bd*4,~ sd ~ sd,hh*8").gain(.55),
+ note("<c2 eb2 g1 bb1>").s("sawtooth").lpf("<320 480 700 430>").gain(.46),
+ note("<[c4,eb4,g4] [ab3,c4,eb4]>").s("triangle").room(.5).slow(2).gain(.26)
+).cpm(124/4)
