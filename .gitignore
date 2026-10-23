@@ -1,0 +1,7 @@
+node_modules/
+recordings/
+public/samples/
+test_e2e.js
+test_strudel.js
+.DS_Store
+*.log

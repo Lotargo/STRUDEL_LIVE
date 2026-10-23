@@ -1,0 +1,11 @@
+{
+  "name": "strudel-live",
+  "displayName": "Strudel Live Stand",
+  "description": "Live algorithmic music generation in Strudel with real-time audio playback, visualizer stand, synthetic vocals, and master audio recording.",
+  "version": "1.0.0",
+  "suggestedPrompts": [
+    "Давай посочиняем в штруделе на 10 минут в стиле дарквейв",
+    "Запусти live сет в стиле witch house с синтетическим голосом",
+    "Сделай 5 минут темного техно с live переходами в штруделе"
+  ]
+}

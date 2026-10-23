@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ STRUDEL LIVE STAND - AGENT LIVE PERFORMER</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="stand-container">
+    <!-- Header -->
+    <header class="stand-header">
+      <div class="stand-logo">
+        <h1>⚡ Strudel Live Performer</h1>
+        <span class="stand-badge" id="badge-style">DARKWAVE</span>
+      </div>
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">INITIALIZING</span>
+      </div>
+    </header>
+
+    <!-- Timeline & Progress Card -->
+    <div class="timeline-card">
+      <div class="timeline-info">
+        <div>
+          <span class="time-display" id="time-elapsed">00:00</span>
+          <span class="time-total" id="time-total">/ 10:00</span>
+        </div>
+        <div class="phase-indicator" id="phase-badge">PHASE 1: ATMOSPHERE</div>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Live Audio Visualizer Card -->
+    <div class="visualizer-card">
+      <div class="card-title">
+        <span>Master Output Spectrum &amp; Oscilloscope</span>
+        <span id="audio-stats">48 kHz | Stereo PCM Stream</span>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="visualizer-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Active Code Display Card -->
+    <div class="code-card">
+      <div class="card-title">
+        <span>Executing Strudel Pattern Buffer</span>
+        <span id="cycle-counter">Cycle: 0.0</span>
+      </div>
+      <pre class="code-view" id="code-display">// Waiting for agent evaluation...</pre>
+    </div>
+
+    <!-- Live Event Log -->
+    <div class="log-card">
+      <div class="card-title">Performer Live Stream &amp; Vox Log</div>
+      <div class="log-view" id="log-container">
+        <div class="log-entry">
+          <span class="log-time">[00:00]</span>
+          <span class="log-msg">Stand standby. Waiting for live coding session start.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/engine.js"></script>
+</body>
+</html>

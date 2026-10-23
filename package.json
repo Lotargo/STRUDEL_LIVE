@@ -1,0 +1,27 @@
+{
+  "name": "strudel_live",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lotargo/STRUDEL_LIVE.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Lotargo/STRUDEL_LIVE/issues"
+  },
+  "homepage": "https://github.com/Lotargo/STRUDEL_LIVE#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@strudel/web": "^1.3.0",
+    "commander": "^15.0.0",
+    "ws": "^8.22.0"
+  }
+}
