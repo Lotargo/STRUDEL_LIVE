@@ -47,6 +47,7 @@ export class LiveSession {
     this.base = null;
     this.finishPromise = null;
     this.recordingEnd = null;
+    this.lastTelemetryAt = null;
   }
 
   elapsed() {
@@ -55,12 +56,26 @@ export class LiveSession {
 
   guidance() {
     const remaining = this.targetSeconds - this.elapsed();
+    if (this.status === 'running' && this.captureHealth() === 'stalled') return 'No fresh audio telemetry: check the browser and recording before composing more.';
     if (this.status === 'interrupted') return 'Recording interrupted. Finish/export this partial take; open a NEW session instead of pretending there is seamless recording.';
     if (this.status !== 'running') return 'Wait for the browser to unlock audio and report recording_started.';
     if (remaining <= 0) return 'Target passed. Resolve the music gracefully and call session_finish when tails decay; target is not a hard cutoff.';
     if (remaining < Math.max(12, this.targetSeconds * 0.08)) return 'Final resolution: remove rhythm, let reverberation decay and finish after silence.';
     if (remaining < Math.max(30, this.targetSeconds * 0.2)) return 'Begin original epilogue soon: harmonic resolution, reduction and vocal callback.';
     return 'Compose the next original change using musical context, not a preset time template.';
+  }
+
+  captureHealth() {
+    if (this.status === 'interrupted') return 'interrupted';
+    if (this.status !== 'running') return 'not_recording';
+    if (this.lastTelemetryAt === null || this.clock() - this.lastTelemetryAt > 4000) return 'stalled';
+    return 'live';
+  }
+
+  history(limit = 50) {
+    const count = Math.min(300, Math.max(1, Math.floor(Number(limit) || 50)));
+    return { session_id: this.id, events: this.events.slice(-count).map(({code, ...event}) =>
+      code === undefined ? event : { ...event, code_chars: code.length }) };
   }
 
   statusSnapshot() {
@@ -76,7 +91,7 @@ export class LiveSession {
       estimated_cycle: Number((elapsed * this.bpm / 240).toFixed(2)),
       suggested_action: this.guidance(),
       engine_connected: this.engineConnected, engine_ready: this.engineReady,
-      recording_state: this.recorderState, audio: this.audio,
+      recording_state: this.recorderState, capture_health: this.captureHealth(), audio: this.audio,
       revisions: this.revisions, active_code: this.activeCode,
       recent_events: this.events.slice(-12),
       recording_webm: this.base ? this.base + '.webm' : null
@@ -149,9 +164,11 @@ export class LiveSession {
       this.startedAt = this.clock();
       this.status = 'running';
       this.recorderState = 'recording';
+      this.lastTelemetryAt = this.clock();
       this.event('recording_started');
     }
     if (message.type === 'telemetry' && message.session_id === this.id) {
+      this.lastTelemetryAt = this.clock();
       this.audio.rms = clamp(Number(message.rms) || 0, 0, 1);
       this.audio.peak = clamp(Number(message.peak) || 0, 0, 1);
       this.recorderState = String(message.recorder_state || this.recorderState);
@@ -233,6 +250,7 @@ export class LiveSession {
 
   async _finish(options) {
     this.status = 'finishing';
+    await this.evalQueue;
     const fadeSeconds = clamp(Number(options.fade_seconds ?? 4), 0.2, 20);
     this.event('finish_requested', { fade_seconds: fadeSeconds });
     let confirmed = false;

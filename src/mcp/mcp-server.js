@@ -26,6 +26,16 @@ const tools = [
     inputSchema: object({})
   },
   {
+    name: 'strudel_session_history',
+    description: 'Get a longer musical performance event history (no large code repeats), to recover decisions and develop coherent long-form arcs.',
+    inputSchema: object({ limit: num('Last 1..300 events, default 50') })
+  },
+  {
+    name: 'strudel_vocal_library',
+    description: 'List imported local vocal/audio samples available for synchronized live overlay.',
+    inputSchema: object({})
+  },
+  {
     name: 'strudel_eval',
     description: 'Apply a newly authored full Strudel JavaScript score to the active performance. Returns success ONLY after browser acknowledges evaluation; failed evaluations preserve server-side last known good code. Do not use preset scheduling.',
     inputSchema: object({ code: str('Complete Strudel program; use setcpm(bpm/4) once for 4/4.'), comment: str('Your musical decision and intended audible difference.') }, ['code'])
@@ -66,6 +76,7 @@ const tools = [
 const aliases = { strudel_vox: 'strudel_vocal_generate', strudel_session_stop: 'strudel_session_finish' };
 const map = {
   strudel_session_start: 'session_start', strudel_session_status: 'session_status',
+  strudel_session_history: 'session_history', strudel_vocal_library: 'sample_library',
   strudel_eval: 'eval', strudel_sample_import: 'sample_import',
   strudel_vocal_play: 'sample_play', strudel_vocal_generate: 'vocal_generate',
   strudel_session_finish: 'session_finish'

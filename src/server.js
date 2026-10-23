@@ -142,6 +142,7 @@ export class LiveServer {
         return { ...result, browser_url: this.browserURL() };
       }
       case 'session_status': return this.session.statusSnapshot();
+      case 'session_history': return this.session.history(command.limit);
       case 'eval': return this.session.evaluate(command.code, command.comment);
       case 'sample_import': {
         const from = path.resolve(String(command.path || ''));
@@ -150,6 +151,11 @@ export class LiveServer {
         if (!fs.statSync(from).isFile() || fs.statSync(from).size > 25 * 1024 * 1024) throw new Error('File missing or exceeds 25MB');
         fs.copyFileSync(from, path.join(SAMPLE_DIR, name));
         return { name, location: path.join(SAMPLE_DIR, name), sample_url: '/samples/' + name };
+      }
+      case 'sample_library': {
+        return { samples: fs.readdirSync(SAMPLE_DIR).filter(validSample).map((name) => ({
+          name, bytes: fs.statSync(path.join(SAMPLE_DIR, name)).size
+        })) };
       }
       case 'sample_play': {
         const name = String(command.sample || '');

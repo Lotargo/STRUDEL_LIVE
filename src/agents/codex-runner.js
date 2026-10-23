@@ -39,6 +39,7 @@ function promptForTurn(state, style) {
     'This is a real performance, not a plan or report. Read AGENTS.md and the relevant .agents/skills.',
     'The musical brief is '+style+'. Full target '+state.target_duration_seconds+'s, tempo '+state.bpm+' BPM.',
     'Elapsed '+state.elapsed_seconds+'s; remaining '+state.remaining_seconds+'s; current status '+state.status+'.',
+    'Capture health: '+state.capture_health+'. If stalled, stop changing music and alert the user.',
     'Current live Strudel code:\n'+(state.active_code || '[NONE YET]'),
     'Recent musical decisions: '+JSON.stringify(state.recent_events),
     'You MUST perform at least one meaningful tool action in this turn: strudel_eval or strudel_session_finish.',
