@@ -11,10 +11,10 @@ export const GENRE_PRESETS = {
     templates: {
       intro: `// [Phase 1: Darkwave Atmosphere / Intro]
 stack(
-  // Low sub bass drone
-  note("<c1 eb1>").s("sawtooth").cutoff(250).resonance(4).gain(0.85),
+  // Pulsing sawtooth bass drone
+  note("<c2 eb2>").s("sawtooth").cutoff(450).resonance(5).gain(0.9),
   // Cold atmospheric texture
-  note("<c3 eb3 g3 c4>").s("triangle").cutoff(400).room(0.8).size(0.9).slow(4).gain(0.4)
+  note("<[c3,eb3,g3] [ab2,c3,eb3]>").s("triangle").cutoff(600).room(0.85).size(0.9).slow(4).gain(0.5)
 ).cpm(124/2)`,
 
       exposition: `// [Phase 2: Exposition / Beat Kick-in]
@@ -24,7 +24,7 @@ stack(
   // Filtered offbeat hats
   s("~ hh*2 ~ hh*2").gain(0.65).hcutoff(3000),
   // Hypnotic sawtooth bass arpeggio
-  note("<[c2 c2] [eb2 c2] [g1 g1] [bb1 g1]>").s("sawtooth").cutoff(450).resonance(6).gain(0.9),
+  note("<[c2 c2] [eb2 c2] [g1 g1] [bb1 g1]>").s("sawtooth").cutoff(600).resonance(6).gain(0.95),
   // Atmospheric pad
   note("<[c3,eb3,g3] [bb2,d3,f3]>").s("triangle").room(0.8).slow(2).gain(0.45)
 ).cpm(124/2)`,
@@ -58,7 +58,7 @@ stack(
   // Stripped back kick heartbeat
   s("bd ~ ~ ~").gain(0.9),
   // Resonant bass drone fading down
-  note("c1").s("sawtooth").cutoff(220).resonance(4).slow(2).gain(0.7),
+  note("c2").s("sawtooth").cutoff(300).resonance(4).slow(2).gain(0.75),
   // Ethereal dissolving synth chords
   note("<[c3,eb3,g3] [ab2,c3,eb3] [bb2,d3,f3] [c3,eb3,g3]>").s("triangle").cutoff(500).room(0.95).size(0.95).slow(4).gain(0.6)
 ).cpm(124/2)`,

@@ -69,7 +69,7 @@ export class StrudelLiveServer {
 
     this.wss.on('connection', (ws) => {
       this.activeWs = ws;
-      console.log('⚡ Stand browser connected via WebSocket.');
+      // Stand browser connected via WebSocket
 
       // Send initial state if session is already running
       if (this.session.status === 'running') {
@@ -112,7 +112,6 @@ export class StrudelLiveServer {
 
     return new Promise((resolve) => {
       this.httpServer.listen(this.port, '127.0.0.1', () => {
-        console.log(`⚡ Strudel Live Server listening at http://127.0.0.1:${this.port}`);
         resolve();
       });
     });
@@ -202,7 +201,7 @@ export class StrudelLiveServer {
       args.push('--window-position=-2000,-2000');
     }
 
-    console.log(`Spawning stand browser: ${binary} for ${url}`);
+    console.error(`Spawning stand browser: ${binary} for ${url}`);
     this.browserProcess = spawn(binary, args, { detached: true, stdio: 'ignore' });
     this.browserProcess.unref();
   }
@@ -237,7 +236,7 @@ export class StrudelLiveServer {
 
     // Wait up to 6 seconds for browser to connect via WebSocket
     if (!this.activeWs) {
-      console.log('Waiting for browser stand to connect...');
+      console.error('Waiting for browser stand to connect...');
       await new Promise((resolve) => {
         const timeout = setTimeout(resolve, 6000);
         const check = setInterval(() => {
@@ -336,10 +335,10 @@ export class StrudelLiveServer {
 
     if (fs.existsSync(webmFile) && fs.statSync(webmFile).size > 0) {
       try {
-        console.log('Transcoding audio recording to WAV and MP3 with ffmpeg...');
+        console.error('Transcoding audio recording to WAV and MP3 with ffmpeg...');
         await execAsync(`ffmpeg -y -i "${webmFile}" -c:a pcm_s16le "${wavFile}"`);
         await execAsync(`ffmpeg -y -i "${webmFile}" -b:a 320k "${mp3File}"`);
-        console.log(`Saved master recording to ${wavFile} and ${mp3File}`);
+        console.error(`Saved master recording to ${wavFile} and ${mp3File}`);
       } catch (err) {
         console.error('ffmpeg transcoding error:', err);
       }

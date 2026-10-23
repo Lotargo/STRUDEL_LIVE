@@ -7,7 +7,8 @@ const execAsync = promisify(exec);
 
 export async function generateSpeechWav(text, outputPath, options = {}) {
   const rate = options.rate ?? -2; // slightly slower for darkwave feel
-  const voice = options.voice ?? ''; // default or 'Microsoft Zira Desktop' / 'Microsoft David Desktop'
+  const isCyrillic = /[а-яА-ЯёЁ]/.test(text);
+  const voice = options.voice || (isCyrillic ? 'Microsoft Irina Desktop' : 'Microsoft Zira Desktop');
   
   // Clean text of quotes
   const safeText = text.replace(/'/g, "''").replace(/"/g, ' ');

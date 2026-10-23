@@ -239,7 +239,6 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
-  console.error('⚡ Strudel Live MCP Server running on stdio');
 }
 
 main().catch((err) => {

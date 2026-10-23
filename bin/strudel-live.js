@@ -59,29 +59,33 @@ async function runAutonomousSet(server, style, totalSeconds) {
 
   // Phase 1: Intro (0s)
   await server.evalCode(t.intro, 'Introductory dark atmospheric drone');
-  await server.triggerVox('System online. Initializing neural sequence.', { rate: -2 });
+  await server.triggerVox('Система в сети. Тьма и пульс. Начинаем погружение.', { rate: -2 });
 
   // Phase 2: Exposition (~15% of duration)
   setTimeout(async () => {
     await server.evalCode(t.exposition, '4-on-the-floor beat kick-in with arpeggio');
+    await server.triggerVox('Чувствуешь этот ритм? Он уже внутри тебя.', { rate: -2 });
   }, Math.max(8000, totalSeconds * 0.15 * 1000));
 
   // Phase 3: Escalation (~35% of duration)
   setTimeout(async () => {
     await server.evalCode(t.escalation, 'Driving drums & screaming resonant lead');
-    await server.triggerVox('Escalating cognitive frequencies.', { rate: -1 });
+    await server.triggerVox('Перегрузка частот. Больше драйва, глубже в экстаз.', { rate: -1 });
   }, Math.max(16000, totalSeconds * 0.35 * 1000));
 
   // Phase 4: Peak (~65% of duration)
   setTimeout(async () => {
-    if (t.peak) await server.evalCode(t.peak, 'Maximum peak energy & bitcrush accents');
+    if (t.peak) {
+      await server.evalCode(t.peak, 'Maximum peak energy & bitcrush accents');
+      await server.triggerVox('Максимальный пик. Никакого контроля.', { rate: -1 });
+    }
   }, Math.max(24000, totalSeconds * 0.65 * 1000));
 
   // Phase 5: Epilogue (~85% of duration)
   setTimeout(async () => {
     if (t.epilogue) {
       await server.evalCode(t.epilogue, 'Epilogue: Deconstructing rhythm into dark reverberant space');
-      await server.triggerVox('Deconstruction imminent. Epilogue sequence.', { rate: -3 });
+      await server.triggerVox('Растворяемся в пустоте. Тьма принимает тебя.', { rate: -3 });
     }
   }, Math.max(32000, totalSeconds * 0.85 * 1000));
 

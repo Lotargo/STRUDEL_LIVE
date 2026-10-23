@@ -1,4 +1,4 @@
-import { initStrudel, evaluate, hush, getAudioContext } from '/strudel-web.mjs';
+import { initStrudel, initAudio, evaluate, hush, getAudioContext, samples } from '/strudel-web.mjs';
 
 let audioCtx = null;
 let mediaRecorder = null;
@@ -167,8 +167,27 @@ async function boot() {
   $('status-text').innerText = 'LOADING AUDIO ENGINE';
   try {
     await initStrudel();
+    try {
+      await initAudio();
+    } catch (e) {
+      console.warn('initAudio non-critical:', e);
+    }
     audioCtx = getAudioContext();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume();
+      } catch (e) {}
+    }
     setupAudioTap(audioCtx);
+
+    // Pre-load standard drum samples
+    try {
+      samples('github:tidalcycles/dirt-samples');
+    } catch (e) {}
+
+    // Check if audio context is running or needs click
+    updateAudioBanner();
+
     $('status-text').innerText = 'READY FOR AGENT';
     connectWebSocket();
   } catch (err) {
@@ -176,6 +195,26 @@ async function boot() {
     console.error('Strudel boot error:', err);
   }
 }
+
+function updateAudioBanner() {
+  const banner = $('audio-unlock-banner');
+  if (!banner) return;
+  if (audioCtx && audioCtx.state === 'suspended') {
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+window.addEventListener('pointerdown', async () => {
+  try {
+    await initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+    updateAudioBanner();
+  } catch (e) {}
+});
 
 function connectWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -207,6 +246,14 @@ function connectWebSocket() {
 
 async function handleServerCommand(msg) {
   if (msg.type === 'start') {
+    try {
+      await initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      updateAudioBanner();
+    } catch (e) {}
+
     sessionConfig.duration = msg.duration || 600;
     sessionConfig.style = msg.style || 'darkwave';
     sessionConfig.bpm = msg.bpm || 124;
@@ -226,6 +273,14 @@ async function handleServerCommand(msg) {
 
   if (msg.type === 'eval') {
     try {
+      try {
+        await initAudio();
+        if (audioCtx && audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        updateAudioBanner();
+      } catch (e) {}
+
       sessionConfig.activeCode = msg.code;
       $('code-display').innerText = msg.code;
       await evaluate(msg.code, true);
